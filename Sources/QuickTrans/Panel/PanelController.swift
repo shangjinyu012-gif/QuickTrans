@@ -62,12 +62,29 @@ final class PanelController {
         model.reset()
         model.source = .input
         self.screen = screen
+        anchorToBall(ballFrame)
+        present(focus: true)
+    }
+
+    /// 悬浮球移动时调用：面板跟着球走，球过了屏幕中线就换到另一侧
+    func followBall(_ ballFrame: NSRect) {
+        guard panel.isVisible else { return }
+        switch anchor {
+        case .leftOf, .rightOf: break
+        default: return
+        }
+        let center = NSPoint(x: ballFrame.midX, y: ballFrame.midY)
+        screen = NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) } ?? screen
+        anchorToBall(ballFrame)
+        layout(panel.frame.size)
+    }
+
+    private func anchorToBall(_ ballFrame: NSRect) {
         let gap: CGFloat = 6
         let onRightHalf = ballFrame.midX > (screen?.visibleFrame.midX ?? 0)
         anchor = onRightHalf
             ? .leftOf(x: ballFrame.minX - gap, top: ballFrame.maxY)
             : .rightOf(x: ballFrame.maxX + gap, top: ballFrame.maxY)
-        present(focus: true)
     }
 
     /// 没有悬浮球时用快捷键呼出：屏幕上方居中，类似 Spotlight

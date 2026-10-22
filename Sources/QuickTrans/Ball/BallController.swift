@@ -9,7 +9,7 @@ final class BallState: ObservableObject {
     @Published var pressed = false
 }
 
-/// 桌面悬浮球：34pt 透明玻璃珠。点击打开输入条，拖动后松手吸附到最近的左右边缘。
+/// 桌面悬浮球：34pt 透明玻璃珠。点击打开输入条，可拖到屏幕任意位置。
 @MainActor
 final class BallController {
     static let ballSize: CGFloat = 34
@@ -18,8 +18,11 @@ final class BallController {
 
     let state = BallState()
     var onClick: (() -> Void)?
+    /// 球移动时回调球的新位置，让输入框跟着走
+    var onMove: ((NSRect) -> Void)?
 
     private let panel: NSPanel
+    private var slideTimer: Timer?
 
     init() {
         let size = Self.windowSize
@@ -53,8 +56,10 @@ final class BallController {
     }
 
     /// 球本身（不含留白）在屏幕上的位置
-    var ballFrame: NSRect {
-        panel.frame.insetBy(dx: (Self.windowSize - Self.ballSize) / 2, dy: (Self.windowSize - Self.ballSize) / 2)
+    var ballFrame: NSRect { Self.ballFrame(forWindow: panel.frame) }
+
+    private static func ballFrame(forWindow frame: NSRect) -> NSRect {
+        frame.insetBy(dx: (windowSize - ballSize) / 2, dy: (windowSize - ballSize) / 2)
     }
 
     var screen: NSScreen? { panel.screen ?? NSScreen.main }
@@ -74,7 +79,9 @@ final class BallController {
     // MARK: - 拖动
 
     fileprivate func move(to origin: NSPoint) {
+        slideTimer?.invalidate()
         panel.setFrameOrigin(origin)
+        onMove?(ballFrame)
     }
 
     fileprivate var origin: NSPoint { panel.frame.origin }
@@ -83,25 +90,46 @@ final class BallController {
         clampToScreen(animated: true)
     }
 
-    /// 吸附到所在屏幕的左边缘或右边缘，并保证不超出上下边界
+    /// 球停在松手的位置；超出屏幕可见区域时推回来，避免拖丢
     private func clampToScreen(animated: Bool) {
         let frame = panel.frame
-        let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: frame.midX, y: frame.midY)) } ?? NSScreen.main
+        let center = NSPoint(x: frame.midX, y: frame.midY)
+        let screen = NSScreen.screens.first { $0.frame.contains(center) }
+            ?? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+            ?? NSScreen.main
         guard let visible = screen?.visibleFrame else { return }
         let inset = (Self.windowSize - Self.ballSize) / 2 - 2
         var target = frame.origin
-        target.x = frame.midX < visible.midX ? visible.minX - inset : visible.maxX - Self.windowSize + inset
+        target.x = min(max(frame.minX, visible.minX - inset), visible.maxX - Self.windowSize + inset)
         target.y = min(max(frame.minY, visible.minY + 4), visible.maxY - Self.windowSize - 4)
         AppSettings.shared.ballOrigin = target
         guard target != frame.origin else { return }
         if animated {
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.22
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().setFrameOrigin(target)
-            }
+            slide(to: target)
         } else {
             panel.setFrameOrigin(target)
+            onMove?(ballFrame)
+        }
+    }
+}
+
+extension BallController {
+    /// 推回屏幕内的动画：逐帧移动并同步通知输入框。系统窗口动画同时驱动两个窗口时，球那一份会被丢掉
+    private func slide(to target: NSPoint) {
+        slideTimer?.invalidate()
+        let start = panel.frame.origin
+        let begin = CACurrentMediaTime()
+        let duration = 0.22
+        slideTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { return timer.invalidate() }
+                let t = min((CACurrentMediaTime() - begin) / duration, 1)
+                let eased = 1 - pow(1 - t, 3)
+                self.panel.setFrameOrigin(NSPoint(x: start.x + (target.x - start.x) * eased,
+                                                  y: start.y + (target.y - start.y) * eased))
+                self.onMove?(self.ballFrame)
+                if t >= 1 { timer.invalidate() }
+            }
         }
     }
 }
@@ -154,11 +182,29 @@ private struct BallView: View {
 
     var body: some View {
         Image(systemName: "translate")
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(state.active ? Color.white : Color.primary)
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(state.active ? AnyShapeStyle(.white) : AnyShapeStyle(.primary.opacity(0.82)))
             .frame(width: BallController.ballSize, height: BallController.ballSize)
             .glassEffect(state.active ? .clear.tint(Theme.accent.opacity(0.75)) : .clear, in: Circle())
-            .opacity(state.active || state.hovering ? 1 : 0.78)
+            // 球只有 34pt，系统玻璃的边缘折射几乎看不出来，补一层顶部反光和渐变亮边，让它读起来像玻璃珠
+            .overlay(alignment: .top) {
+                Ellipse()
+                    .fill(LinearGradient(colors: [.white.opacity(0.38), .white.opacity(0)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 22, height: 12)
+                    .offset(y: 2.5)
+                    .blendMode(.plusLighter)
+            }
+            .overlay(
+                Circle().strokeBorder(
+                    LinearGradient(stops: [.init(color: .white.opacity(0.9), location: 0),
+                                           .init(color: .white.opacity(0.08), location: 0.45),
+                                           .init(color: .white.opacity(0.08), location: 0.7),
+                                           .init(color: .white.opacity(0.45), location: 1)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    lineWidth: 0.75)
+            )
+            .shadow(color: .black.opacity(0.22), radius: 5, y: 2)
+            .shadow(color: .black.opacity(0.12), radius: 1, y: 0.5)
             .scaleEffect(state.pressed ? 0.94 : (state.hovering ? 1.08 : 1))
             .animation(.spring(response: 0.28, dampingFraction: 0.6), value: state.hovering)
             .animation(.spring(response: 0.2, dampingFraction: 0.7), value: state.pressed)

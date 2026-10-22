@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setUpStatusItem()
 
         ball.onClick = { [weak self] in self?.toggleFromBall() }
+        ball.onMove = { [weak self] frame in self?.panel.followBall(frame) }
         panel.onClose = { [weak self] in self?.ball.state.active = false }
         panel.onOpenSettings = { [weak self] in self?.openSettings() }
 
