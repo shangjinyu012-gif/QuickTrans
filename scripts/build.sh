@@ -1,8 +1,8 @@
 #!/bin/zsh
-# 编译并打包 build/QuickTrans.app。加 --install 时复制到 /Applications 并重新启动。
+# 编译并打包 build.noindex/QuickTrans.app。加 --install 时复制到 /Applications 并重新启动。
 set -euo pipefail
 cd "$(dirname "$0")/.."
-APP=build/QuickTrans.app
+APP=build.noindex/QuickTrans.app
 SIGN_ID="QuickTrans Dev"
 
 swift build -c release --product QuickTrans

@@ -13,16 +13,39 @@ macOS 菜单栏翻译小工具，界面用 Liquid Glass 材质（macOS 26+）。
 
 快捷键默认 `⌥D` 翻译选中文本、`⌥Space` 打开输入框，可在设置里改。
 
-## 构建与安装
+## 安装
 
-需要 macOS 26 以上和 Swift 6 工具链（Xcode 或命令行工具均可）。
+需要 macOS 26 以上、Apple 芯片（M 系列）的 Mac。
+
+### 直接下载
+
+1. 在 [Releases](https://github.com/shangjinyu012-gif/QuickTrans/releases/latest) 下载 `QuickTrans-x.y.z.zip`，解压后把 QuickTrans 拖进「应用程序」文件夹。
+2. 双击打开。App 没有经过苹果公证，系统会提示无法验证开发者，有两种放行方式：
+   - 打开「系统设置 → 隐私与安全性」，在页面底部点「仍要打开」；
+   - 或者在终端执行：
+     ```bash
+     xattr -dr com.apple.quarantine /Applications/QuickTrans.app
+     ```
+3. 打开后点菜单栏的 QuickTrans 图标，进入「设置」，填入自己的 API Key（默认 DeepSeek，在 [platform.deepseek.com](https://platform.deepseek.com) 申请），点「测试连接」。
+4. 第一次按 `⌥D` 翻译选中文字时，按提示在「系统设置 → 隐私与安全性 → 辅助功能」里勾选 QuickTrans。
+
+更新到新版本时，重复第 1、2 步。如果划词不起作用，在「辅助功能」里先删掉 QuickTrans，再重新添加。
+
+### 从源码编译
+
+需要 Swift 6 工具链（Xcode 或命令行工具均可）。
 
 ```bash
 ./scripts/make-cert.sh        # 只需一次：生成自签名证书「QuickTrans Dev」
 ./scripts/build.sh --install  # 编译、签名、安装到 /Applications 并启动
 ```
 
-用固定证书签名后，重新编译不会让「辅助功能」授权失效。首次使用划词翻译时按提示在「系统设置 → 隐私与安全性 → 辅助功能」里勾选 QuickTrans。
+用固定证书签名后，重新编译不会让「辅助功能」授权失效。
+
+## 发布新版本
+
+1. 改 `Resources/Info.plist` 里的 `CFBundleShortVersionString`，提交并推送。
+2. 执行 `./scripts/release.sh`：编译、打成 zip，并在 GitHub 上创建 `v<版本号>` 的 Release。
 
 图标由 `swift scripts/make-icon.swift` 生成。
 

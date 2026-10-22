@@ -1,7 +1,7 @@
 import QuickTransCore
 import SwiftUI
 
-/// 翻译面板。胶囊态（280×34，透明玻璃）→ 出结果后展开成卡片（380 宽，常规玻璃）。
+/// 翻译面板。胶囊态（280×34）→ 出结果后展开成卡片（380 宽），都用常规玻璃，叠在杂乱背景上也看得清。
 struct TranslatorView: View {
     @ObservedObject var model: PanelModel
     @ObservedObject private var settings = AppSettings.shared
@@ -30,7 +30,7 @@ struct TranslatorView: View {
             }
         }
         .frame(width: compact ? 280 : 380)
-        .glassEffect(compact ? .clear : .regular,
+        .glassEffect(.regular,
                      in: RoundedRectangle(cornerRadius: compact ? 17 : 18, style: .continuous))
         .fixedSize(horizontal: false, vertical: true)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { onSize($0) }
