@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>QuickTrans 原型</title>
+<style>
+  :root {
+    --glass: rgba(250, 250, 252, 0.93);
+    --glass-dark: rgba(30, 30, 34, 0.72);
+    --line: rgba(28, 30, 38, 0.09);
+    --text: #1c1e26;          /* 墨 */
+    --sub: #6b6f7b;           /* 铅笔灰 */
+    --accent: #3451b2;        /* 墨水蓝：词性、发音、选中态 */
+    --accent-soft: rgba(52, 81, 178, 0.10);
+    --marker: rgba(255, 222, 74, 0.75);   /* 荧光笔：例句关键词、记忆 */
+    --serif: "New York", ui-serif, "Iowan Old Style", Georgia, "Songti SC", serif;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(60% 70% at 85% 20%, #ff9f6e 0%, transparent 60%),
+      radial-gradient(55% 60% at 70% 85%, #c86dd7 0%, transparent 60%),
+      radial-gradient(70% 80% at 10% 90%, #3a7bd5 0%, transparent 65%),
+      radial-gradient(50% 50% at 40% 30%, #6a5cff 0%, transparent 70%),
+      #1e2a5a;
+    font-size: 13px;
+    user-select: none;
+  }
+
+  /* ---------- 液体玻璃 ----------
+     clear：控件用（悬浮球、输入条），透光多、模糊少；
+     regular：内容用（结果卡片、菜单、侧栏），多一层乳白保证文字可读。
+     真实 App 用 SwiftUI .glassEffect(.clear / .regular)，这里只是 CSS 近似。 */
+  .lg { position: relative; isolation: isolate; }
+  .lg::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 3;
+    background: linear-gradient(135deg,
+      rgba(255,255,255,.95) 0%, rgba(255,255,255,.25) 22%, rgba(255,255,255,0) 45%,
+      rgba(255,255,255,0) 60%, rgba(255,255,255,.3) 82%, rgba(255,255,255,.8) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+  }
+  .lg::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 0;
+    background: radial-gradient(130% 70% at 25% -10%, rgba(255,255,255,.38), rgba(255,255,255,0) 55%);
+  }
+  .lg > * { position: relative; z-index: 1; }
+  .lg-clear {
+    background: rgba(255,255,255,.16);
+    backdrop-filter: blur(8px) saturate(1.9) brightness(1.06);
+    -webkit-backdrop-filter: blur(8px) saturate(1.9) brightness(1.06);
+    box-shadow: inset 0 -1px 6px rgba(255,255,255,.18), 0 8px 24px rgba(10,14,40,.22);
+  }
+  .lg-regular {
+    background: rgba(255,255,255,.58);
+    backdrop-filter: blur(28px) saturate(1.9) brightness(1.04);
+    -webkit-backdrop-filter: blur(28px) saturate(1.9) brightness(1.04);
+    box-shadow: inset 0 -1px 8px rgba(255,255,255,.25), 0 18px 50px rgba(10,14,40,.30);
+  }
+
+  /* ---------- 菜单栏 ---------- */
+  .menubar {
+    position: fixed; top: 0; left: 0; right: 0; height: 26px;
+    background: rgba(255,255,255,0.35); backdrop-filter: blur(30px);
+    display: flex; align-items: center; padding: 0 14px; gap: 18px;
+    font-size: 13px; z-index: 50;
+  }
+  .menubar b { font-weight: 600; }
+  .menubar .right { margin-left: auto; display: flex; gap: 16px; align-items: center; }
+  .tray { position: relative; cursor: default; padding: 2px 6px; border-radius: 4px; display: flex; }
+  .tray:hover, .tray.open { background: rgba(255,255,255,0.45); }
+  .tray-menu {
+    display: none; position: absolute; top: 24px; right: 0; width: 230px;
+    border-radius: 12px; padding: 5px;
+  }
+  .tray.open .tray-menu { display: block; }
+  .tray-menu div, .tray-menu hr { position: relative; z-index: 1; }
+  .tray-menu div { padding: 4px 10px; border-radius: 7px; display: flex; justify-content: space-between; }
+  .tray-menu div:hover { background: var(--accent); color: #fff; }
+  .tray-menu div:hover kbd { color: #fff; }
+  .tray-menu hr { border: 0; border-top: 0.5px solid var(--line); margin: 4px 6px; }
+  kbd { font-family: inherit; color: var(--sub); font-size: 12px; }
+
+  /* ---------- 示例文档窗口（用于划词） ---------- */
+  .doc {
+    position: absolute; left: 60px; top: 70px; width: 560px;
+    background: #fff; border-radius: 10px; box-shadow: 0 20px 50px rgba(0,0,0,.35);
+    overflow: hidden;
+  }
+  .titlebar { height: 34px; background: #ececec; display: flex; align-items: center; padding: 0 12px; gap: 8px; border-bottom: 1px solid #ddd; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .titlebar span { margin-left: auto; margin-right: auto; color: var(--sub); font-size: 12px; transform: translateX(-24px); }
+  .doc-body { padding: 18px 24px 22px; line-height: 1.75; font-size: 14px; user-select: text; }
+  .doc-body h3 { margin: 0 0 8px; font-size: 16px; }
+  .doc-body p { margin: 0 0 12px; }
+  .doc-body ::selection { background: #b3d7ff; }
+
+  /* ---------- 说明面板 ---------- */
+  .guide {
+    position: absolute; left: 60px; bottom: 40px; width: 560px;
+    background: var(--glass-dark); color: #f2f2f7; backdrop-filter: blur(30px);
+    border-radius: 12px; padding: 14px 18px; line-height: 1.7; font-size: 12.5px;
+  }
+  .guide b { color: #fff; }
+  .guide ol { margin: 6px 0 0; padding-left: 18px; }
+  .guide code { background: rgba(255,255,255,.15); padding: 0 5px; border-radius: 4px; }
+
+  /* ---------- 悬浮球 ---------- */
+  /* 34px 毛玻璃小球；闲置时半透明，悬停时变实；拖到屏幕边缘自动吸附 */
+  .ball {
+    position: absolute; left: calc(100% - 34px - 6px); top: 160px; width: 34px; height: 34px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    cursor: grab; z-index: 30;
+    transition: transform .25s cubic-bezier(.3,1.4,.5,1), left .22s ease-out, background .2s;
+  }
+  .ball svg { width: 17px; height: 17px; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.35)); }
+  .ball:hover { transform: scale(1.1); }
+  .ball:active { transform: scale(.94); }
+  .ball.dragging { transition: none; cursor: grabbing; transform: scale(1.12); }
+  .ball.active { background: rgba(52,81,178,.55); }
+
+  /* ---------- 翻译面板（悬浮球和划词共用） ---------- */
+  /* 悬浮球入口：先是一条与球等高（34px）的胶囊输入条，从球的一侧伸出；出结果后再向下展开成卡片 */
+  .panel {
+    position: absolute; width: 380px; z-index: 40;
+    border-radius: 18px; display: none; overflow: hidden;
+    transition: width .22s cubic-bezier(.3,1.2,.5,1), border-radius .22s ease-out, background .22s, backdrop-filter .22s;
+  }
+  .panel.show { display: block; animation: grow .28s cubic-bezier(.3,1.3,.5,1); }
+  .panel.compact {
+    width: 280px; border-radius: 17px;
+    background: rgba(255,255,255,.30);
+    backdrop-filter: blur(10px) saturate(1.9) brightness(1.08);
+    -webkit-backdrop-filter: blur(10px) saturate(1.9) brightness(1.08);
+  }
+  .panel.compact textarea::placeholder { color: rgba(28,30,38,.6); }
+  @keyframes grow { from { transform: scale(.2, .9); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .input-row { display: flex; align-items: center; gap: 4px; min-height: 34px; padding: 7px 5px 7px 14px; }
+  .input-row .icon-btn { margin: -2px 0; }
+  .input-row textarea {
+    flex: 1; border: 0; outline: 0; background: transparent; resize: none;
+    font: inherit; font-size: 14px; line-height: 20px; height: 20px; max-height: 100px; color: var(--text);
+    padding: 0; margin: 0;
+  }
+  .input-row textarea::placeholder { color: #9a9ea8; }
+  .panel:not(.compact) .input-row { border-bottom: 0.5px solid rgba(28,30,38,.08); }
+  .icon-btn {
+    width: 24px; height: 24px; border-radius: 12px; border: 0; background: transparent;
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--sub);
+  }
+  .icon-btn:hover { background: rgba(255,255,255,.6); color: var(--text); }
+  .icon-btn:focus-visible, .speak:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .icon-btn svg { width: 15px; height: 15px; }
+
+  .source-quote {
+    margin: 12px 16px 0; padding: 0 0 0 10px; border-left: 2px solid var(--accent);
+    color: var(--sub); max-height: 60px; overflow: hidden;
+    font-family: var(--serif); font-size: 13px; line-height: 1.5;
+  }
+  .result { padding: 14px 16px 8px; max-height: 460px; overflow: auto; user-select: text; }
+  .result:empty { display: none; }
+
+  /* 词头：唯一的视觉重点。衬线体 + 词典式音节分隔点 */
+  .word-head { display: flex; align-items: baseline; gap: 10px; }
+  .word-head h2 { margin: 0; font-family: var(--serif); font-size: 27px; font-weight: 600; letter-spacing: -.01em; line-height: 1.15; }
+  .word-head h2 .syl { color: #b4b8c2; font-weight: 400; margin: 0 .04em; }
+  .tag { font-size: 11px; color: var(--sub); border: 0.5px solid #c9ccd4; border-radius: 4px; padding: 0 5px; line-height: 16px; }
+  .phonetics { display: flex; gap: 16px; margin: 6px 0 12px; }
+  .ph { display: flex; align-items: center; gap: 5px; font-family: var(--serif); font-size: 14px; color: #3b3e48; }
+  .ph em { font-style: normal; font-family: -apple-system, "PingFang SC", sans-serif; color: var(--sub); font-size: 11.5px; }
+  .speak { width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--accent-soft); color: var(--accent); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+  .speak:hover { background: var(--accent); color: #fff; }
+  .speak.playing { background: var(--accent); color: #fff; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(52,81,178,.18); } }
+  .speak svg { width: 12px; height: 12px; }
+
+  .mean { display: flex; gap: 8px; margin: 2px 0; line-height: 1.6; font-size: 13.5px; }
+  .pos { color: var(--accent); font-family: var(--serif); font-style: italic; min-width: 22px; }
+
+  .section-title { font-size: 11.5px; color: var(--sub); margin: 16px 0 6px; font-weight: 500; }
+  .howto { display: grid; grid-template-columns: 52px 1fr; gap: 6px 10px; line-height: 1.6; font-size: 12.8px; }
+  .howto .k { color: var(--sub); font-size: 11.5px; padding-top: 1px; }
+  .howto i, .memory i, .collo dt { font-style: normal; font-family: var(--serif); color: var(--text); }
+  .howto b, .memory b { font-weight: 600; color: var(--text); }
+
+  /* 记忆：像便签上用荧光笔划过的一句话 */
+  .memory { margin: 14px 0 0; padding: 9px 11px; border-radius: 6px; background: rgba(255, 228, 110, .38); line-height: 1.6; font-size: 12.8px; color: #3b3e48; }
+  .memory .mk { color: #8a6a00; font-weight: 600; margin-right: 8px; }
+  .memory b { background: linear-gradient(transparent 58%, var(--marker) 58%); }
+
+  .collo { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 0; font-size: 13px; line-height: 1.6; }
+  .collo dd { margin: 0; color: var(--sub); }
+
+  .usage { margin: 0 0 9px; line-height: 1.55; }
+  .usage .en { font-family: var(--serif); font-size: 14px; color: var(--text); }
+  .usage .en b { font-weight: inherit; background: linear-gradient(transparent 60%, var(--marker) 60%); }
+  .usage .zh { color: var(--sub); font-size: 12.5px; }
+
+  .para { font-size: 14.5px; line-height: 1.8; white-space: pre-wrap; }
+  .para.en { font-family: var(--serif); font-size: 15px; }
+  .cursor { display: inline-block; width: 2px; height: 16px; background: var(--accent); vertical-align: -3px; margin-left: 1px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .loading { color: var(--sub); display: flex; gap: 8px; align-items: center; padding: 2px 0 8px; font-size: 12.5px; }
+  .spinner { width: 13px; height: 13px; border: 1.5px solid rgba(0,0,0,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .footer {
+    display: none; align-items: center; gap: 10px; padding: 4px 6px 6px 16px;
+    color: rgba(28,30,38,.55); font-size: 11px;
+  }
+  .footer.show { display: flex; }
+  .footer .sp { flex: 1; }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .lg-clear, .lg-regular, .panel.compact, .settings { background: rgba(246,246,248,.98) !important; backdrop-filter: none !important; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+
+  /* ---------- 设置窗口 ---------- */
+  .settings {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 640px; height: 450px; background: rgba(242,242,247,.78); border-radius: 18px;
+    backdrop-filter: blur(50px) saturate(1.8); -webkit-backdrop-filter: blur(50px) saturate(1.8);
+    box-shadow: 0 0 0 0.5px rgba(255,255,255,.6) inset, 0 30px 80px rgba(0,0,0,.45); display: none; z-index: 60; overflow: hidden;
+  }
+  .settings.show { display: flex; flex-direction: column; }
+  .settings .titlebar { background: transparent; border-bottom: 0; height: 40px; padding: 0 16px; }
+  .settings .titlebar span { transform: translateX(-30px); font-weight: 600; color: var(--text); }
+  .settings-main { flex: 1; display: flex; min-height: 0; }
+  .side { width: 150px; flex: none; margin: 0 0 10px 10px; padding: 8px 6px; border-radius: 14px; background: rgba(255,255,255,.4); }
+  .side div { position: relative; z-index: 1; }
+  .side div { padding: 6px 10px; border-radius: 8px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+  .side div.on { background: var(--accent); color: #fff; }
+  .side div:not(.on):hover { background: rgba(0,0,0,.06); }
+  .pane { flex: 1; padding: 18px 22px; overflow: auto; }
+  .pane > section { display: none; }
+  .pane > section.on { display: block; }
+  .group { background: rgba(255,255,255,.82); border-radius: 12px; border: 0.5px solid rgba(0,0,0,.06); margin-bottom: 14px; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; gap: 12px; min-height: 40px; }
+  .row + .row { border-top: 0.5px solid #e5e5e5; }
+  .row label { white-space: nowrap; }
+  .row .desc { color: var(--sub); font-size: 11.5px; margin-top: 2px; white-space: nowrap; }
+  .row input[type=text], .row input[type=password], .row select {
+    font: inherit; padding: 4px 8px; border-radius: 6px; border: 0.5px solid #c8c8cc; background: #fff; width: 260px;
+  }
+  .seg { display: inline-flex; background: #e3e3e6; border-radius: 7px; padding: 2px; }
+  .seg button { border: 0; background: transparent; font: inherit; padding: 3px 14px; border-radius: 5px; cursor: pointer; }
+  .seg button.on { background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+  .seg.disabled { opacity: .4; pointer-events: none; }
+  .switch { width: 34px; height: 20px; border-radius: 10px; background: #34c759; position: relative; cursor: pointer; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 16px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: left .15s; }
+  .switch.off { background: #d1d1d6; }
+  .switch.off::after { left: 2px; }
+  .recorder {
+    min-width: 120px; text-align: center; padding: 4px 10px; border-radius: 6px;
+    border: 0.5px solid #c8c8cc; background: #fff; cursor: pointer; font-weight: 500;
+  }
+  .recorder.rec { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(10,132,255,.25); color: var(--accent); }
+  .btn { font: inherit; padding: 4px 12px; border-radius: 6px; border: 0.5px solid #c8c8cc; background: #fff; cursor: pointer; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .ok { color: #248a3d; font-size: 12px; }
+  .pane h4 { margin: 0 0 8px; font-size: 12px; color: var(--sub); font-weight: 600; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%);
+    background: rgba(0,0,0,.75); color: #fff; padding: 8px 16px; border-radius: 8px;
+    font-size: 12.5px; display: none; z-index: 99;
+  }
+</style>
+</head>
+<body>
+
+<!-- 菜单栏 -->
+<div class="menubar">
+  <b></b><b>QuickTrans</b><span>文件</span><span>编辑</span>
+  <div class="right">
+    <div class="tray" id="tray" title="QuickTrans 菜单栏图标">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h8M8 3v2M5.5 5c1 4 4 7 7 8M10.5 5c-1 4-3.5 7-6.5 8"/><path d="M13 21l4-9 4 9M14.5 18h5"/></svg>
+      <div class="tray-menu lg lg-regular">
+        <div onclick="openBallPanel()">打开输入框 <kbd>⌥ Space</kbd></div>
+        <div onclick="toast('选中任意文字后按快捷键即可')">翻译选中文本 <kbd>⌥ D</kbd></div>
+        <hr>
+        <div onclick="toggleBall()"><span id="ballMenuText">隐藏悬浮球</span></div>
+        <div onclick="toast('历史记录：原型暂未画出')">历史记录…</div>
+        <div onclick="openSettings()">设置… <kbd>⌘ ,</kbd></div>
+        <hr>
+        <div onclick="toast('退出 QuickTrans')">退出 <kbd>⌘ Q</kbd></div>
+      </div>
+    </div>
+    <span>中</span><span>10月22日 周四 14:30</span>
+  </div>
+</div>
+
+<!-- 示例文档窗口 -->
+<div class="doc">
+  <div class="titlebar">
+    <div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div>
+    <span>任意应用中的文本（用来试划词）</span>
+  </div>
+  <div class="doc-body">
+    <h3>The Art of Serendipity</h3>
+    <p>Many of the most important scientific breakthroughs were not planned. Penicillin, for example, was discovered by accident when Alexander Fleming noticed mold killing bacteria in a petri dish. Researchers call this <i>serendipity</i>, and some labs now deliberately design for it.</p>
+    <p>好的工具应该在你需要的时候出现，在你不需要的时候消失。划词翻译就是这样一种不打断思路的交互。</p>
+  </div>
+</div>
+
+<!-- 说明面板 -->
+<div class="guide">
+  <b>原型可以这样试</b>
+  <ol>
+    <li>点击右侧边缘的<b>半透明小球</b>（可拖动，松手吸附到左右边缘），输入 <code>serendipity</code> 或一段英文/中文，按 <b>回车</b></li>
+    <li>在左上窗口<b>选中</b>一个单词或一段话，按 <code>⌥ D</code>（Option + D），结果弹在选区旁</li>
+    <li>单词卡片里点击 <b>美 / 英 发音按钮</b>（原型用浏览器语音，App 里用系统 en-US / en-GB 语音）</li>
+    <li>点击右上角<b>菜单栏图标</b>或面板里的齿轮打开<b>设置</b>；面板内按 <code>Esc</code> 关闭</li>
+  </ol>
+  <div style="margin-top:6px;color:#c7c7cc">翻译结果是写死的示例数据，只演示交互和版式。</div>
+</div>
+
+<!-- 悬浮球 -->
+<div class="ball lg lg-clear" id="ball" title="点击输入，拖动可移动，松手吸附到屏幕边缘">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h8M8 3v2M5.5 5c1 4 4 7 7 8M10.5 5c-1 4-3.5 7-6.5 8"/><path d="M13 21l4-9 4 9M14.5 18h5"/></svg>
+</div>
+
+<!-- 翻译面板 -->
+<div class="panel lg lg-regular" id="panel">
+  <div id="quote" class="source-quote" style="display:none"></div>
+  <div class="input-row" id="inputRow">
+    <textarea id="input" rows="1" placeholder="输入单词或句子，回车翻译" aria-label="要翻译的内容"></textarea>
+    <button class="icon-btn" title="设置" onclick="openSettings()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </div>
+  <div class="result" id="result"></div>
+  <div class="footer" id="footer">
+    <span id="metaModel">deepseek-flash</span><span id="metaDir"></span><span id="metaTime"></span>
+    <span class="sp"></span>
+    <button class="icon-btn" title="复制译文" onclick="toast('已复制译文')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+    <button class="icon-btn" title="重新翻译" onclick="submit(lastText)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+    <button class="icon-btn" title="固定窗口（失焦不关闭）" id="pinBtn" onclick="togglePin()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5M5 17h14l-2-4V5h1V3H6v2h1v8z"/></svg></button>
+  </div>
+</div>
+
+<!-- 设置窗口 -->
+<div class="settings" id="settings">
+  <div class="titlebar">
+    <div class="dot" style="background:#ff5f57;cursor:pointer" onclick="closeSettings()"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#ccc"></div>
+    <span>QuickTrans 设置</span>
+  </div>
+  <div class="settings-main">
+    <div class="side lg lg-regular" id="side">
+      <div class="on" data-tab="model">模型</div>
+      <div data-tab="hotkey">快捷键</div>
+      <div data-tab="general">通用</div>
+    </div>
+    <div class="pane">
+      <!-- 模型 -->
+      <section class="on" id="tab-model">
+        <h4>服务</h4>
+        <div class="group">
+          <div class="row"><label>服务商</label>
+            <select id="provider" onchange="onProvider()">
+              <option value="deepseek">DeepSeek</option>
+              <option value="openai">OpenAI</option>
+              <option value="custom">自定义（兼容 OpenAI 接口）</option>
+            </select></div>
+          <div class="row"><label>接口地址</label><input type="text" id="baseUrl" value="https://api.deepseek.com"></div>
+          <div class="row"><div><label>API Key</label><div class="desc">保存在系统钥匙串</div></div>
+            <div style="display:flex;gap:8px;align-items:center"><input type="password" value="sk-xxxxxxxxxxxxxxxx" style="width:170px"><button class="btn" onclick="testConn(this)">测试连接</button></div></div>
+        </div>
+        <h4>模型</h4>
+        <div class="group">
+          <div class="row"><div><label>翻译模型</label><div class="desc">列表从 /models 接口拉取</div></div>
+            <select id="model" onchange="onModel()"></select></div>
+          <div class="row"><div><label>推理强度</label><div class="desc" id="effortDesc">越高越准，越慢</div></div>
+            <div class="seg" id="effort"></div></div>
+        </div>
+        <div class="desc" style="padding:0 4px">单词音标优先取自在线词典，模型只负责释义和例句；查不到时才用模型给出的音标。</div>
+      </section>
+      <!-- 快捷键 -->
+      <section id="tab-hotkey">
+        <h4>全局快捷键</h4>
+        <div class="group">
+          <div class="row"><div><label>翻译选中文本</label><div class="desc">需要授予「辅助功能」权限</div></div><div class="recorder" onclick="record(this)">⌥ D</div></div>
+          <div class="row"><label>打开输入框</label><div class="recorder" onclick="record(this)">⌥ Space</div></div>
+        </div>
+        <h4>权限</h4>
+        <div class="group">
+          <div class="row"><div><label>辅助功能</label><div class="desc">用于读取其它应用中的选中文字</div></div><span class="ok">● 已授权</span></div>
+        </div>
+      </section>
+      <!-- 通用 -->
+      <section id="tab-general">
+        <div class="group">
+          <div class="row"><label>显示桌面悬浮球</label><div class="switch" id="ballSwitch" onclick="toggleBall()"></div></div>
+          <div class="row"><label>开机自动启动</label><div class="switch" onclick="this.classList.toggle('off')"></div></div>
+          <div class="row"><div><label>划词后自动复制译文</label></div><div class="switch off" onclick="this.classList.toggle('off')"></div></div>
+        </div>
+        <div class="group">
+          <div class="row"><label>默认发音</label><div class="seg"><button class="on" onclick="segPick(this)">美式</button><button onclick="segPick(this)">英式</button></div></div>
+          <div class="row"><label>查询单词后自动发音</label><div class="switch off" onclick="this.classList.toggle('off')"></div></div>
+        </div>
+        <div class="group">
+          <div class="row"><label>历史记录</label><div style="display:flex;gap:8px;align-items:center"><span class="desc">本地保存最近 500 条</span><button class="btn" onclick="toast('已清空历史记录')">清空</button></div></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------------- 示例数据 ---------------- */
+const WORDS = {
+  serendipity: {
+    syl: "ser·en·dip·i·ty", us: "/ˌserənˈdɪpəti/", uk: "/ˌserənˈdɪpɪti/", level: "GRE",
+    means: [["n.", "机缘巧合；意外发现珍奇事物的运气"]],
+    howto: [
+      ["句法", "多作<b>不可数名词</b>，常放在 be 后面评价一件事：<i>It was (pure) serendipity that…</i>"],
+      ["句型", "<i>by serendipity</i> 偶然地；<i>a stroke of serendipity</i> 一次意外的好运"],
+      ["语体", "偏书面、带褒义，指「歪打正着的好事」；日常口语更常说 <i>lucky coincidence</i>"],
+      ["辨析", "<i>coincidence</i> 只是「碰巧同时发生」，好坏都行；<i>serendipity</i> 强调<b>意外得到了好东西</b>"],
+      ["词族", "形容词 <i>serendipitous</i>（意外而幸运的）：<i>a serendipitous encounter</i>"],
+    ],
+    memory: "源自童话《锡兰三王子》（The Three Princes of <b>Serendip</b>，Serendip 是斯里兰卡古称），三位王子旅途中总能意外发现宝贝。记成「Serendip 的王子运」。",
+    phrases: [["by serendipity", "偶然地"], ["pure serendipity", "纯属巧合"], ["a stroke of serendipity", "意外的好运"]],
+    usages: [
+      ["Meeting her was pure <b>serendipity</b>.", "遇见她纯属机缘巧合。"],
+      ["The discovery of penicillin is a classic case of <b>serendipity</b>.", "青霉素的发现是机缘巧合的经典案例。"],
+    ],
+  },
+  run: {
+    us: "/rʌn/", uk: "/rʌn/", level: "高频",
+    means: [["v.", "跑；运行；经营；竞选"], ["n.", "跑步；连续；一段时期"]],
+    howto: [
+      ["核心义", "不管哪个意思，本质都是<b>「持续地动起来」</b>：人跑、机器转、公司运营、程序执行"],
+      ["句法", "不及物：<i>The engine runs well.</i>；及物（经营、运行）：<i>run a company / run a test</i>"],
+      ["时态", "不规则变化 <b>run – ran – run</b>，过去分词和原形相同，容易写错"],
+      ["辨析", "<i>run a shop</i> 经营（自己管）≠ <i>own a shop</i> 拥有；<i>run</i> 程序是执行，<i>open</i> 是打开"],
+    ],
+    memory: "抓住「持续运转」这一个画面，其余义项都能推出来：钱 run out（流光了）、颜色 run（掉色、流出来）。",
+    phrases: [["run out of", "用完"], ["run into", "偶遇；撞上"], ["in the long run", "从长远看"]],
+    usages: [
+      ["She <b>runs</b> a small bakery downtown.", "她在市中心经营一家小面包店。"],
+      ["The script <b>runs</b> every night at midnight.", "这个脚本每晚零点运行。"],
+    ],
+  },
+};
+const PARA_ZH = "许多最重要的科学突破并非事先计划好的。例如，亚历山大·弗莱明注意到培养皿中的霉菌杀死了细菌，从而意外发现了青霉素。研究者把这称为「机缘巧合」，如今一些实验室甚至会刻意为它创造条件。";
+const PARA_EN = "A good tool should appear when you need it and disappear when you don't. Selection translation is exactly this kind of interaction — one that never breaks your train of thought.";
+
+const MODELS = {
+  deepseek: [
+    { id: "deepseek-flash", efforts: ["low", "high", "max"], def: "low" },
+    { id: "deepseek-v4-pro", efforts: ["low", "high", "max"], def: "low" },
+  ],
+  openai: [
+    { id: "gpt-5.4-mini", efforts: ["minimal", "low", "medium", "high"], def: "low" },
+    { id: "gpt-5.5", efforts: ["minimal", "low", "medium", "high"], def: "low" },
+    { id: "gpt-4.1-mini", efforts: [], def: null },
+  ],
+  custom: [{ id: "（手动填写模型名）", efforts: [], def: null }],
+};
+
+/* ---------------- 工具 ---------------- */
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+let lastText = "", pinned = false, streamTimer = null;
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 1600);
+}
+const ICON_SPEAK = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3z"/><path d="M16 8.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="2" fill="none"/></svg>';
+
+/* ---------------- 悬浮球：拖动 + 点击 ---------------- */
+const ball = $("ball");
+(function drag() {
+  let sx, sy, ox, oy, moved = false;
+  ball.addEventListener("mousedown", e => {
+    sx = e.clientX; sy = e.clientY; const r = ball.getBoundingClientRect(); ox = r.left; oy = r.top; moved = false;
+    const mv = ev => {
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      if (Math.abs(dx) + Math.abs(dy) > 3) { moved = true; ball.classList.add("dragging"); }
+      ball.style.left = ox + dx + "px";
+      ball.style.top = Math.min(Math.max(32, oy + dy), innerHeight - 40) + "px";
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up);
+      ball.classList.remove("dragging");
+      if (!moved) { openBallPanel(); return; }
+      // 松手后吸附到最近的左右边缘
+      const r2 = ball.getBoundingClientRect();
+      ball.style.left = (r2.left + r2.width / 2 < innerWidth / 2 ? 6 : innerWidth - r2.width - 6) + "px";
+    };
+    document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
+  });
+})();
+
+function placePanelNear(x, y) {
+  const p = $("panel"), W = innerWidth, H = innerHeight;
+  let left = Math.min(Math.max(10, x), W - 430);
+  let top = Math.min(Math.max(34, y), H - 200);
+  p.style.left = left + "px"; p.style.top = top + "px";
+}
+
+function openBallPanel() {
+  closeTray();
+  const r = ball.getBoundingClientRect();
+  // 胶囊与球等高、顶部对齐；球在右边缘时向左伸出，在左边缘时向右伸出
+  const onRight = r.left > innerWidth / 2;
+  const p = $("panel");
+  p.classList.add("compact");
+  p.style.transformOrigin = onRight ? "right center" : "left center";
+  p.dataset.anchor = onRight ? "right" : "left";
+  p.style.top = r.top + "px";
+  if (onRight) { p.style.left = "auto"; p.style.right = (innerWidth - r.left + 6) + "px"; }
+  else { p.style.right = "auto"; p.style.left = (r.right + 6) + "px"; }
+  ball.classList.add("active");
+  $("quote").style.display = "none";
+  $("inputRow").style.display = "flex";
+  $("result").innerHTML = ""; $("footer").classList.remove("show");
+  $("panel").classList.add("show");
+  $("input").value = ""; autoGrow(); setTimeout(() => $("input").focus(), 10);
+}
+
+function closePanel() { $("panel").classList.remove("show"); ball.classList.remove("active"); clearInterval(streamTimer); speechSynthesis.cancel(); }
+
+/* ---------------- 输入与提交 ---------------- */
+const input = $("input");
+function autoGrow() { input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; }
+input.addEventListener("input", autoGrow);
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (input.value.trim()) submit(input.value.trim()); }
+});
+
+function isWord(t) { return /^[A-Za-z][A-Za-z'-]*$/.test(t); }
+function isChinese(t) { const zh = (t.match(/[一-龥]/g) || []).length; return zh / t.replace(/\s/g, "").length > 0.3; }
+
+function submit(text) {
+  lastText = text;
+  clearInterval(streamTimer); speechSynthesis.cancel();
+  const res = $("result"), foot = $("footer");
+  foot.classList.remove("show");
+  $("panel").classList.remove("compact");
+  res.innerHTML = '<div class="loading"><div class="spinner"></div>正在翻译…</div>';
+  const isW = isWord(text);
+  const start = performance.now();
+  setTimeout(() => {
+    if (isW) renderWord(text.toLowerCase());
+    else renderPara(text);
+    $("metaDir").textContent = isW ? "单词" : isChinese(text) ? "中译英" : "译成中文";
+    $("metaTime").textContent = ((performance.now() - start) / 1000 + 0.4).toFixed(1) + " 秒";
+    foot.classList.add("show");
+  }, isW ? 700 : 400);
+}
+
+function renderWord(w) {
+  const d = WORDS[w] || {
+    us: "/…/", uk: "/…/", level: "示例",
+    means: [["—", "（原型只内置了 serendipity、run 两个词，其它单词显示占位内容）"]],
+    howto: [], memory: "", phrases: [], usages: [],
+  };
+  const head = (d.syl || w).split("·").map(esc).join('<span class="syl">·</span>');
+  $("result").innerHTML = `
+    <div class="word-head"><h2>${head}</h2><span class="tag">${d.level}</span></div>
+    <div class="phonetics">
+      <div class="ph"><em>美</em>${d.us}<button class="speak" onclick="speak('${w}','en-US',this)" title="美式发音" aria-label="美式发音">${ICON_SPEAK}</button></div>
+      <div class="ph"><em>英</em>${d.uk}<button class="speak" onclick="speak('${w}','en-GB',this)" title="英式发音" aria-label="英式发音">${ICON_SPEAK}</button></div>
+    </div>
+    ${d.means.map(m => `<div class="mean"><span class="pos">${m[0]}</span><span>${m[1]}</span></div>`).join("")}
+    ${d.howto.length ? `<div class="section-title">怎么用</div><div class="howto">${d.howto.map(h => `<span class="k">${h[0]}</span><span>${h[1]}</span>`).join("")}</div>` : ""}
+    ${d.memory ? `<div class="memory"><span class="mk">记法</span>${d.memory}</div>` : ""}
+    ${d.phrases.length ? `<div class="section-title">常用搭配</div><dl class="collo">${d.phrases.map(p => `<dt>${p[0]}</dt><dd>${p[1]}</dd>`).join("")}</dl>` : ""}
+    ${d.usages.length ? `<div class="section-title">例句</div>${d.usages.map(u => `<div class="usage"><div class="en">${u[0]}</div><div class="zh">${u[1]}</div></div>`).join("")}` : ""}
+  `;
+}
+
+function renderPara(text) {
+  const zh = isChinese(text);
+  let out;
+  if (zh) out = text.includes("工具") ? PARA_EN : "[原型示例] Your Chinese text would be translated into English here, streamed token by token.";
+  else out = /serendipity|penicillin|breakthrough/i.test(text) ? PARA_ZH : "[原型示例] 这里会以流式方式逐字显示中文译文。";
+  const res = $("result");
+  res.innerHTML = `<div class="para${zh ? " en" : ""}"></div>`;
+  const box = res.firstChild; let i = 0;
+  streamTimer = setInterval(() => {
+    i += zh ? 4 : 2;
+    box.innerHTML = esc(out.slice(0, i)) + (i < out.length ? '<span class="cursor"></span>' : "");
+    if (i >= out.length) clearInterval(streamTimer);
+  }, 30);
+}
+
+/* ---------------- 发音 ---------------- */
+function speak(word, lang, btn) {
+  speechSynthesis.cancel();
+  document.querySelectorAll(".speak.playing").forEach(b => b.classList.remove("playing"));
+  const u = new SpeechSynthesisUtterance(word);
+  u.lang = lang; u.rate = 0.9;
+  const v = speechSynthesis.getVoices().find(v => v.lang.replace("_", "-") === lang);
+  if (v) u.voice = v;
+  btn.classList.add("playing");
+  u.onend = u.onerror = () => btn.classList.remove("playing");
+  speechSynthesis.speak(u);
+}
+speechSynthesis.getVoices();
+
+/* ---------------- 划词快捷键 ⌥D ---------------- */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { if ($("settings").classList.contains("show")) closeSettings(); else closePanel(); return; }
+  if (e.altKey && e.code === "Space") { e.preventDefault(); openBallPanel(); return; }
+  if (e.metaKey && e.key === ",") { e.preventDefault(); openSettings(); return; }
+  if (e.altKey && e.code === "KeyD") {
+    e.preventDefault();
+    const sel = getSelection(); const text = sel.toString().trim();
+    if (!text) { toast("没有选中文字：先在左上窗口里选中一段文本"); return; }
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    const p = $("panel"); p.classList.remove("compact"); p.style.right = "auto"; p.style.transformOrigin = "left top";
+    placePanelNear(rect.left, rect.bottom + 8);
+    const q = $("quote"); q.textContent = text; q.style.display = "block";
+    $("inputRow").style.display = "none";
+    $("panel").classList.add("show");
+    submit(text);
+  }
+});
+
+/* 点击面板外关闭（未固定时） */
+document.addEventListener("mousedown", e => {
+  if (!pinned && $("panel").classList.contains("show") && !e.target.closest("#panel,#ball,.tray,#settings")) closePanel();
+  if (!e.target.closest(".tray")) closeTray();
+});
+function togglePin() { pinned = !pinned; $("pinBtn").style.color = pinned ? "var(--accent)" : ""; toast(pinned ? "已固定：点击外部不关闭" : "已取消固定"); }
+
+/* ---------------- 菜单栏 ---------------- */
+$("tray").addEventListener("click", e => { if (!e.target.closest(".tray-menu")) $("tray").classList.toggle("open"); });
+function closeTray() { $("tray").classList.remove("open"); }
+function toggleBall() {
+  const hidden = ball.style.display === "none";
+  ball.style.display = hidden ? "flex" : "none";
+  $("ballMenuText").textContent = hidden ? "隐藏悬浮球" : "显示悬浮球";
+  $("ballSwitch").classList.toggle("off", !hidden);
+  closeTray();
+}
+
+/* ---------------- 设置 ---------------- */
+function openSettings() { closeTray(); $("settings").classList.add("show"); }
+function closeSettings() { $("settings").classList.remove("show"); }
+document.querySelectorAll("#side div").forEach(d => d.onclick = () => {
+  document.querySelectorAll("#side div").forEach(x => x.classList.toggle("on", x === d));
+  document.querySelectorAll(".pane section").forEach(s => s.classList.toggle("on", s.id === "tab-" + d.dataset.tab));
+});
+function onProvider() {
+  const p = $("provider").value;
+  $("baseUrl").value = { deepseek: "https://api.deepseek.com", openai: "https://api.openai.com/v1", custom: "" }[p];
+  $("model").innerHTML = MODELS[p].map(m => `<option>${m.id}</option>`).join("");
+  onModel();
+}
+function onModel() {
+  const m = MODELS[$("provider").value].find(x => x.id === $("model").value);
+  const seg = $("effort");
+  if (!m.efforts.length) {
+    seg.className = "seg disabled"; seg.innerHTML = "<button>不支持</button>";
+    $("effortDesc").textContent = "该模型不支持推理强度";
+  } else {
+    seg.className = "seg";
+    seg.innerHTML = m.efforts.map(e => `<button class="${e === m.def ? "on" : ""}" onclick="segPick(this)">${e}</button>`).join("");
+    $("effortDesc").textContent = "越高越准，越慢；划词建议 low";
+  }
+}
+function segPick(b) { b.parentNode.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); }
+function testConn(b) { b.textContent = "测试中…"; setTimeout(() => { b.textContent = "测试连接"; toast("连接成功 · 余额 ¥10.00 · 2 个可用模型"); }, 800); }
+function record(el) {
+  el.classList.add("rec"); el.textContent = "请按下快捷键…";
+  const h = e => {
+    e.preventDefault(); e.stopPropagation();
+    if (["Alt", "Meta", "Control", "Shift"].includes(e.key)) return;
+    const k = (e.ctrlKey ? "⌃ " : "") + (e.altKey ? "⌥ " : "") + (e.shiftKey ? "⇧ " : "") + (e.metaKey ? "⌘ " : "");
+    const key = e.code === "Space" ? "Space" : e.code.replace(/^Key|^Digit/, "");
+    el.textContent = k + key; el.classList.remove("rec");
+    document.removeEventListener("keydown", h, true);
+  };
+  document.addEventListener("keydown", h, true);
+}
+onProvider();
+
+/* 截图用：#pill 只打开输入条，#word / #para 直接展示结果 */
+if (location.hash) {
+  const h = location.hash.slice(1);
+  openBallPanel();
+  if (h === "word") submit("serendipity");
+  if (h === "settings") { closePanel(); openSettings(); }
+  if (h === "menu") { closePanel(); $("tray").classList.add("open"); }
+  if (h === "para") submit("Many of the most important scientific breakthroughs were not planned. Penicillin was discovered by serendipity.");
+}
+</script>
+</body>
+</html>
